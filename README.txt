@@ -1,5 +1,7 @@
 # MotorcycleAITask
 
+NOT: Package klasörü içerisinde oyunun build edilmiş hali bulunmaktadır!
+
 Unreal Engine 5.3 ile geliştirilmiş, multiplayer destekli bir baskın simülasyonu projesidir. İki karşıt taraf (Friendly ve Enemy) karargahlarından asker üreterek birbirleriyle savaşır. Friendly taraf motosikletli birliklere, Enemy taraf ise piyade askerlerine sahiptir.
 
 ## Genel Mimari
