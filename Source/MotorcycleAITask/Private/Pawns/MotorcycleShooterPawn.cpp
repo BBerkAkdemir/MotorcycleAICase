@@ -5,6 +5,7 @@
 #pragma region UnrealComponents
 
 #include "Components/CapsuleComponent.h"
+#include "Components/AudioComponent.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Net/UnrealNetwork.h"
 
@@ -12,10 +13,10 @@
 
 #pragma region InProjectIncludes
 
-#include "Headquarters/Headquarters.h"
 #include "Pawns/Components/MotorcycleShooterAnimInstance.h"
 #include "Pawns/AIControllers/MotorcycleShooterAIController.h"
 #include "Motorcycle/MotorcyclePawn.h"
+#include "Pawns/MotorcycleDriverPawn.h"
 
 #pragma endregion
 
@@ -25,11 +26,15 @@ void AMotorcycleShooterPawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 
 	DOREPLIFETIME(AMotorcycleShooterPawn, bIsFiring);
 	DOREPLIFETIME(AMotorcycleShooterPawn, FireTarget);
+	DOREPLIFETIME(AMotorcycleShooterPawn, CurrentAmmo);
 }
 
 AMotorcycleShooterPawn::AMotorcycleShooterPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	MaxHealth = 90.f;
+	Health = MaxHealth;
+	CurrentAmmo = MaxAmmo;
 
 	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleRoot"));
 	SetRootComponent(CapsuleComponent);
@@ -60,6 +65,10 @@ AMotorcycleShooterPawn::AMotorcycleShooterPawn()
 	WeaponMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
 	WeaponMesh->SetGenerateOverlapEvents(false);
 	WeaponMesh->SetCanEverAffectNavigation(false);
+
+	FireAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FireAudioComponent"));
+	FireAudioComponent->SetupAttachment(RootComponent);
+	FireAudioComponent->bAutoActivate = false;
 }
 
 void AMotorcycleShooterPawn::BeginPlay()
@@ -67,9 +76,50 @@ void AMotorcycleShooterPawn::BeginPlay()
 	Super::BeginPlay();
 	if (HasAuthority())
 	{
-		GetWorldTimerManager().SetTimer(TH_ReplicationDelay, this, &AMotorcycleShooterPawn::PushInThePool, 2, false);
+		PoolState = EPawnPoolState::Alive;
+		Health = MaxHealth;
+		if (!GetController())
+		{
+			SpawnDefaultController();
+		}
+		AIControllerComponent = Cast<AMotorcycleShooterAIController>(GetController());
 	}
 	AnimInstance = Cast<UMotorcycleShooterAnimInstance>(SkeletalMesh->GetAnimInstance());
+}
+
+void AMotorcycleShooterPawn::OnRep_IsFiring()
+{
+	if (bIsFiring)
+	{
+		if (FireAudioComponent && FireLoopSound)
+		{
+			FireAudioComponent->SetSound(FireLoopSound);
+			FireAudioComponent->AttenuationSettings = nullptr;
+			FireAudioComponent->bOverrideAttenuation = true;
+			FireAudioComponent->AttenuationOverrides.FalloffDistance = FireSoundRadius;
+			FireAudioComponent->Play();
+		}
+	}
+	else
+	{
+		if (FireAudioComponent)
+		{
+			FireAudioComponent->Stop();
+		}
+	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(bIsFiring);
+	}
+}
+
+void AMotorcycleShooterPawn::OnRep_FireTarget()
+{
+	if (AnimInstance)
+	{
+		AnimInstance->SetTarget(FireTarget);
+	}
 }
 
 void AMotorcycleShooterPawn::SetIsFiring(bool bNewFiring)
@@ -84,6 +134,20 @@ void AMotorcycleShooterPawn::SetIsFiring(bool bNewFiring)
 		bIsFiring = false;
 		StopFiring();
 	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(bIsFiring);
+	}
+}
+
+void AMotorcycleShooterPawn::SetFireTarget(AActor* NewTarget)
+{
+	FireTarget = NewTarget;
+	if (AnimInstance)
+	{
+		AnimInstance->SetTarget(NewTarget);
+	}
 }
 
 void AMotorcycleShooterPawn::StartFiring()
@@ -91,6 +155,15 @@ void AMotorcycleShooterPawn::StartFiring()
 	if (HasAuthority())
 	{
 		GetWorldTimerManager().SetTimer(TH_Fire, this, &AMotorcycleShooterPawn::PerformFire, FireRate, true);
+	}
+
+	if (FireAudioComponent && FireLoopSound)
+	{
+		FireAudioComponent->SetSound(FireLoopSound);
+		FireAudioComponent->AttenuationSettings = nullptr;
+		FireAudioComponent->bOverrideAttenuation = true;
+		FireAudioComponent->AttenuationOverrides.FalloffDistance = FireSoundRadius;
+		FireAudioComponent->Play();
 	}
 }
 
@@ -100,6 +173,11 @@ void AMotorcycleShooterPawn::StopFiring()
 	{
 		GetWorldTimerManager().ClearTimer(TH_Fire);
 	}
+
+	if (FireAudioComponent)
+	{
+		FireAudioComponent->Stop();
+	}
 }
 
 void AMotorcycleShooterPawn::PerformFire()
@@ -108,6 +186,19 @@ void AMotorcycleShooterPawn::PerformFire()
 	{
 		return;
 	}
+
+	if (CurrentAmmo <= 0)
+	{
+		SetIsFiring(false);
+		AMotorcyclePawn* Motorcycle = Cast<AMotorcyclePawn>(GetAttachParentActor());
+		if (Motorcycle)
+		{
+			Motorcycle->OnShooterAmmoDepleted();
+		}
+		return;
+	}
+
+	CurrentAmmo--;
 
 	FVector MuzzleLocation = WeaponMesh->GetComponentLocation();
 	FVector DirectionToTarget = (FireTarget->GetActorLocation() - MuzzleLocation).GetSafeNormal();
@@ -159,11 +250,17 @@ void AMotorcycleShooterPawn::Internal_OnDead(FName HitBoneName, FVector ImpactNo
 {
 	Super::Internal_OnDead(HitBoneName, ImpactNormal);
 
-	StopFiring();
-	bIsFiring = false;
+	if (FireAudioComponent)
+	{
+		FireAudioComponent->Stop();
+	}
 
 	if (HasAuthority())
 	{
+		StopFiring();
+		bIsFiring = false;
+		FireTarget = nullptr;
+
 		if (IsValid(AIControllerComponent))
 		{
 			AIControllerComponent->UnPossess();
@@ -176,7 +273,15 @@ void AMotorcycleShooterPawn::Internal_OnDead(FName HitBoneName, FVector ImpactNo
 		}
 	}
 
-	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::PhysicsOnly);
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(false);
+		AnimInstance->SetTarget(nullptr);
+	}
+
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	SkeletalMesh->SetSimulatePhysics(true);
 	SkeletalMesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
 	if (HitBoneName != NAME_None)
@@ -192,12 +297,28 @@ void AMotorcycleShooterPawn::Internal_PushInThePool()
 {
 	Super::Internal_PushInThePool();
 
-	StopFiring();
-	bIsFiring = false;
-	FireTarget = nullptr;
+	if (FireAudioComponent)
+	{
+		FireAudioComponent->Stop();
+	}
 
+	if (HasAuthority())
+	{
+		StopFiring();
+		bIsFiring = false;
+		FireTarget = nullptr;
+	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(false);
+		AnimInstance->SetTarget(nullptr);
+	}
+
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SkeletalMesh->SetSimulatePhysics(false);
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, 0, 0));
 	SkeletalMesh->SetActive(false, true);
 	SkeletalMesh->SetVisibility(false);
@@ -214,12 +335,6 @@ void AMotorcycleShooterPawn::Internal_PushInThePool()
 		{
 			AIControllerComponent->UnPossess();
 		}
-
-		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
-		{
-			HQ->AddActorToPoolList(this);
-		}
 	}
 }
 
@@ -227,10 +342,12 @@ void AMotorcycleShooterPawn::Internal_PullFromThePool(FVector PullLocation)
 {
 	Super::Internal_PullFromThePool(PullLocation);
 
-	SetActorLocationAndRotation(PullLocation, FRotator(0.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+	CurrentAmmo = MaxAmmo;
 
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SkeletalMesh->SetSimulatePhysics(false);
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, -90, 0));
 	SkeletalMesh->SetActive(true, true);
 	SkeletalMesh->SetVisibility(true);
@@ -256,13 +373,12 @@ void AMotorcycleShooterPawn::Internal_PullFromThePool(FVector PullLocation)
 		{
 			AIControllerComponent->Possess(this);
 		}
-
-		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
-		{
-			HQ->AddActorToAliveList(this);
-		}
 	}
+}
+
+void AMotorcycleShooterPawn::RefillAmmo()
+{
+	CurrentAmmo = MaxAmmo;
 }
 
 void AMotorcycleShooterPawn::ActorAttachToComponent(USceneComponent* AttachedComponent)

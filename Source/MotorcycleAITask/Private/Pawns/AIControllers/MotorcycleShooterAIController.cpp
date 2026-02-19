@@ -119,13 +119,11 @@ void AMotorcycleShooterAIController::OnTargetPerceptionUpdated(AActor* Actor, FA
 		{
 			GetWorldTimerManager().ClearTimer(TH_SightControl);
 			SightActor = nullptr;
-			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Idle);
-
 			if (ControlledPawn)
 			{
-				ControlledPawn->SetIsFiring(false);
 				ControlledPawn->SetFireTarget(nullptr);
 			}
+			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Idle);
 		}
 		else
 		{
@@ -138,7 +136,12 @@ void AMotorcycleShooterAIController::DistanceControl()
 {
 	SightActors.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor)
 	{
-		return !WeakActor.IsValid();
+		if (!WeakActor.IsValid())
+		{
+			return true;
+		}
+		ARaidSimulationBasePawn* Pawn = Cast<ARaidSimulationBasePawn>(WeakActor.Get());
+		return Pawn && Pawn->GetPoolState() != EPawnPoolState::Alive;
 	});
 
 	MostNearlyLength = TNumericLimits<float>::Max();
@@ -162,7 +165,6 @@ void AMotorcycleShooterAIController::DistanceControl()
 				if (ControlledPawn)
 				{
 					ControlledPawn->SetFireTarget(SightActor);
-					ControlledPawn->SetIsFiring(true);
 				}
 			}
 			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Fire);
@@ -171,13 +173,11 @@ void AMotorcycleShooterAIController::DistanceControl()
 		{
 			GetWorldTimerManager().ClearTimer(TH_SightControl);
 			SightActor = nullptr;
-			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Idle);
-
 			if (ControlledPawn)
 			{
-				ControlledPawn->SetIsFiring(false);
 				ControlledPawn->SetFireTarget(nullptr);
 			}
+			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Idle);
 		}
 	}
 }
@@ -186,6 +186,12 @@ void AMotorcycleShooterAIController::MostNearlyControl(AActor* Actor)
 {
 	if (Actor && ControlledPawn)
 	{
+		ARaidSimulationBasePawn* TargetPawn = Cast<ARaidSimulationBasePawn>(Actor);
+		if (TargetPawn && TargetPawn->GetPoolState() != EPawnPoolState::Alive)
+		{
+			return;
+		}
+
 		float DistSquared = FVector::DistSquared(Actor->GetActorLocation(), ControlledPawn->GetActorLocation());
 		if (DistSquared < MostNearlyLength)
 		{

@@ -2,18 +2,10 @@
 
 
 #include "Pawns/Components/MotorcycleShooterAnimInstance.h"
-#include "Pawns/MotorcycleShooterPawn.h"
 
 void UMotorcycleShooterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
-
-	AMotorcycleShooterPawn* ShooterPawn = Cast<AMotorcycleShooterPawn>(TryGetPawnOwner());
-	if (ShooterPawn)
-	{
-		bIsFireStart = ShooterPawn->GetIsFiring();
-		Target = ShooterPawn->GetFireTarget();
-	}
 
 	if (Target && GetOwningActor())
 	{

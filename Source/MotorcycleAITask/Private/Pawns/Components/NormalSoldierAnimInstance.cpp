@@ -2,18 +2,10 @@
 
 
 #include "Pawns/Components/NormalSoldierAnimInstance.h"
-#include "Pawns/NormalSoldierPawn.h"
 
 void UNormalSoldierAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
-
-	ANormalSoldierPawn* SoldierPawn = Cast<ANormalSoldierPawn>(TryGetPawnOwner());
-	if (SoldierPawn)
-	{
-		bIsFireStart = SoldierPawn->GetIsFiring();
-		Target = SoldierPawn->GetFireTarget();
-	}
 
 	if (Target && GetOwningActor())
 	{

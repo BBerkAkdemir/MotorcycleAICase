@@ -40,13 +40,6 @@ void UMotorcycleMovementComponent::BeginPlay()
 
 	OwnerPawn = StaticCast<AMotorcyclePawn*>(GetOwner());
 
-	TArray<AActor*> SplineActors;
-	UGameplayStatics::GetAllActorsOfClass(this, ASplinePathActor::StaticClass(), SplineActors);
-	if (!SplineActors.IsEmpty())
-	{
-		CachedSplinePath = Cast<ASplinePathActor>(SplineActors[0]);
-	}
-
 	CollisionQueryParams.AddIgnoredActor(GetOwner());
 
 	if (bIsAutoActiveMovement)
@@ -73,7 +66,7 @@ void UMotorcycleMovementComponent::TickComponent(float DeltaTime, ELevelTick Tic
 	}
 	else
 	{
-		float Delta = FMath::Clamp(float(DeltaTime) / 100, 0.0f, 1.0f);
+		float Delta = FMath::Clamp(float(DeltaTime) / 250.0f, 0.0f, 1.0f);
 		OwnerPawn->SetActorLocation(FMath::Lerp(OwnerPawn->GetActorLocation(), NewRepLocation, Delta));
 		OwnerPawn->SetActorRotation(UKismetMathLibrary::RLerp(OwnerPawn->GetActorRotation(), NewRepRotation, Delta, true));
 		OwnerPawn->GetMesh()->SetRelativeRotation(UKismetMathLibrary::RLerp(OwnerPawn->GetMesh()->GetRelativeRotation(), NewRepMeshRotation, Delta, true));
@@ -141,7 +134,17 @@ void UMotorcycleMovementComponent::UpdateSplineTarget()
 
 		if (bSplineForward && CurrentSplineDistance >= SplineLength)
 		{
-			CurrentSplineDistance = SplineLookaheadDistance;
+			if (bLoopSpline)
+			{
+				CurrentSplineDistance = SplineLookaheadDistance;
+			}
+			else
+			{
+				CurrentSplineDistance = SplineLength;
+				FollowMode = EMotorcycleFollowMode::FollowActor;
+				OnSplineEndReached.Broadcast();
+				return;
+			}
 		}
 		else if (!bSplineForward && CurrentSplineDistance <= 0.f)
 		{
@@ -229,7 +232,7 @@ void UMotorcycleMovementComponent::MoveMotorcycle()
 	OwnerPawn->AddMovementInput(ForwardVector, CurrentSpeed);
 }
 
-void UMotorcycleMovementComponent::SetSplinePath(ASplinePathActor* SplinePath, bool bForward)
+void UMotorcycleMovementComponent::SetSplinePath(ASplinePathActor* SplinePath, bool bForward, bool bLoop)
 {
 	if (!SplinePath)
 	{
@@ -239,6 +242,7 @@ void UMotorcycleMovementComponent::SetSplinePath(ASplinePathActor* SplinePath, b
 
 	CachedSplinePath = SplinePath;
 	bSplineForward = bForward;
+	bLoopSpline = bLoop;
 	FollowMode = EMotorcycleFollowMode::FollowSpline;
 
 	CurrentSplineDistance = CachedSplinePath->FindDistanceClosestToWorldLocation(OwnerPawn->GetActorLocation());

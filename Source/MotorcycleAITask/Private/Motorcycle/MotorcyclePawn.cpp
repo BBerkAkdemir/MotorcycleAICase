@@ -5,8 +5,10 @@
 #pragma region UnrealComponents
 
 #include "Components/CapsuleComponent.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
+#include "Kismet/GameplayStatics.h"
 
 #pragma endregion
 
@@ -40,6 +42,8 @@ AMotorcyclePawn::AMotorcyclePawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	MaxHealth = 375.f;
+	Health = MaxHealth;
 
 	if (PerceptionStimuliSource)
 	{
@@ -82,6 +86,10 @@ AMotorcyclePawn::AMotorcyclePawn()
 	GunnerSeatPoint = CreateDefaultSubobject<USceneComponent>(TEXT("GunnerSeatPoint"));
 	GunnerSeatPoint->SetupAttachment(Mesh);
 	GunnerSeatPoint->SetRelativeLocation(FVector(-20.f, 25.f, 0.f));
+
+	EngineAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EngineAudioComponent"));
+	EngineAudioComponent->SetupAttachment(Mesh);
+	EngineAudioComponent->bAutoActivate = false;
 }
 
 void AMotorcyclePawn::BeginPlay()
@@ -115,7 +123,17 @@ void AMotorcyclePawn::OnSplineEndReached()
 		return;
 	}
 
-	if (MotorcycleState == EMotorcycleState::ReturningToHQ)
+	AHeadquarters* HQ = GetOwningHeadquarters();
+
+	if (MotorcycleState == EMotorcycleState::Approaching)
+	{
+		MotorcycleState = EMotorcycleState::Combat;
+		if (HQ)
+		{
+			MotorcycleMovementComponent->SetSplinePath(HQ->GetCombatSpline(), true, true);
+		}
+	}
+	else if (MotorcycleState == EMotorcycleState::Escaping)
 	{
 		SupplySoldier();
 	}
@@ -132,11 +150,61 @@ void AMotorcyclePawn::OnCrewMemberDied(ARaidSimulationBasePawn* DeadCrew)
 	{
 		MotorcycleState = EMotorcycleState::Stopped;
 		MotorcycleMovementComponent->DeactivateMovement();
+		GetWorldTimerManager().SetTimer(TH_DeathToPool, this, &ARaidSimulationBasePawn::ReturnToPoolAfterDeath, DeathToPoolDelay, false);
 	}
 	else if (DeadCrew == AttachedShooter)
 	{
-		MotorcycleState = EMotorcycleState::ReturningToHQ;
-		MotorcycleMovementComponent->SetSplinePath(MotorcycleMovementComponent->GetCachedSplinePath(), false);
+		if (MotorcycleState == EMotorcycleState::Stopped)
+		{
+			return;
+		}
+
+		AHeadquarters* HQ = GetOwningHeadquarters();
+		if (!HQ)
+		{
+			return;
+		}
+
+		if (MotorcycleState == EMotorcycleState::Approaching)
+		{
+			MotorcycleState = EMotorcycleState::Escaping;
+			MotorcycleMovementComponent->SetSplinePath(HQ->GetApproachSpline(), false, false);
+		}
+		else if (MotorcycleState == EMotorcycleState::Combat)
+		{
+			MotorcycleState = EMotorcycleState::Escaping;
+			MotorcycleMovementComponent->SetSplinePath(HQ->GetRandomEscapeSpline(), true, false);
+		}
+	}
+}
+
+void AMotorcyclePawn::OnShooterAmmoDepleted()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (MotorcycleState == EMotorcycleState::Stopped)
+	{
+		return;
+	}
+
+	AHeadquarters* HQ = GetOwningHeadquarters();
+	if (!HQ)
+	{
+		return;
+	}
+
+	if (MotorcycleState == EMotorcycleState::Approaching)
+	{
+		MotorcycleState = EMotorcycleState::Escaping;
+		MotorcycleMovementComponent->SetSplinePath(HQ->GetApproachSpline(), false, false);
+	}
+	else if (MotorcycleState == EMotorcycleState::Combat)
+	{
+		MotorcycleState = EMotorcycleState::Escaping;
+		MotorcycleMovementComponent->SetSplinePath(HQ->GetRandomEscapeSpline(), true, false);
 	}
 }
 
@@ -147,27 +215,55 @@ void AMotorcyclePawn::SupplySoldier()
 		return;
 	}
 
-	MotorcycleState = EMotorcycleState::Resupplying;
-
-	AHeadquarters* HQ = GetOwningHeadquarters();
-	if (HQ)
+	if (MotorcycleState != EMotorcycleState::Escaping)
 	{
-		ARaidSimulationBasePawn* NewShooter = HQ->SpawnActorAccordingToSoldierType(ESoldierType::MotorcycleShooter);
-		if (NewShooter)
-		{
-			NewShooter->ActorAttachToComponent(GunnerSeatPoint);
-			AttachedShooter = Cast<AMotorcycleShooterPawn>(NewShooter);
-			MotorcycleMovementComponent->AddIgnoredActorForTrace(NewShooter);
-		}
+		return;
 	}
 
-	MotorcycleState = EMotorcycleState::Combat;
-	MotorcycleMovementComponent->SetSplinePath(MotorcycleMovementComponent->GetCachedSplinePath(), true);
+	MotorcycleState = EMotorcycleState::Resupplying;
+
+	if (IsValid(AttachedShooter))
+	{
+		if (AttachedShooter->GetPoolState() == EPawnPoolState::Dead || AttachedShooter->GetPoolState() == EPawnPoolState::InPool)
+		{
+			AttachedShooter->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+			AttachedShooter->CancelPendingPoolReturn();
+			AttachedShooter->PullFromThePool(GunnerSeatPoint->GetComponentLocation());
+			AttachedShooter->ActorAttachToComponent(GunnerSeatPoint);
+			MotorcycleMovementComponent->AddIgnoredActorForTrace(AttachedShooter);
+		}
+		AttachedShooter->HealToMax();
+		AttachedShooter->RefillAmmo();
+	}
+
+	if (IsValid(AttachedDriver))
+	{
+		AttachedDriver->HealToMax();
+	}
+
+	HealToMax();
+
+	AHeadquarters* HQ = GetOwningHeadquarters();
+	MotorcycleState = EMotorcycleState::Approaching;
+	if (HQ)
+	{
+		MotorcycleMovementComponent->SetSplinePath(HQ->GetApproachSpline(), true, false);
+	}
 }
 
 void AMotorcyclePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
 {
 	Super::Internal_OnDead(HitBoneName, ImpactNormal);
+
+	if (EngineAudioComponent)
+	{
+		EngineAudioComponent->Stop();
+	}
+
+	if (ExplosionSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, ExplosionSound, GetActorLocation());
+	}
 
 	if (HasAuthority())
 	{
@@ -176,13 +272,15 @@ void AMotorcyclePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
 			AIControllerComponent->UnPossess();
 		}
 
-		if (IsValid(AttachedDriver) && AttachedDriver->GetPoolState() == EPawnPoolState::Alive)
+		if (IsValid(AttachedDriver) && AttachedDriver->GetPoolState() != EPawnPoolState::InPool)
 		{
-			AttachedDriver->DamageControl(9999.f, NAME_None, FVector::ZeroVector, FVector::ZeroVector);
+			AttachedDriver->CancelPendingPoolReturn();
+			AttachedDriver->PushInThePool();
 		}
-		if (IsValid(AttachedShooter) && AttachedShooter->GetPoolState() == EPawnPoolState::Alive)
+		if (IsValid(AttachedShooter) && AttachedShooter->GetPoolState() != EPawnPoolState::InPool)
 		{
-			AttachedShooter->DamageControl(9999.f, NAME_None, FVector::ZeroVector, FVector::ZeroVector);
+			AttachedShooter->CancelPendingPoolReturn();
+			AttachedShooter->PushInThePool();
 		}
 	}
 
@@ -197,8 +295,11 @@ void AMotorcyclePawn::Internal_PushInThePool()
 {
 	Super::Internal_PushInThePool();
 
-	AttachedDriver = nullptr;
-	AttachedShooter = nullptr;
+	if (EngineAudioComponent)
+	{
+		EngineAudioComponent->Stop();
+	}
+
 	MotorcycleState = EMotorcycleState::Idle;
 
 	MotorcycleMovementComponent->ClearIgnoredCrewForTrace();
@@ -224,8 +325,28 @@ void AMotorcyclePawn::Internal_PushInThePool()
 			AIControllerComponent->UnPossess();
 		}
 
+		if (IsValid(AttachedDriver))
+		{
+			AttachedDriver->CancelPendingPoolReturn();
+			AttachedDriver->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+			if (AttachedDriver->GetPoolState() != EPawnPoolState::InPool)
+			{
+				AttachedDriver->PushInThePool();
+			}
+		}
+
+		if (IsValid(AttachedShooter))
+		{
+			AttachedShooter->CancelPendingPoolReturn();
+			AttachedShooter->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+			if (AttachedShooter->GetPoolState() != EPawnPoolState::InPool)
+			{
+				AttachedShooter->PushInThePool();
+			}
+		}
+
 		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
+		if (HQ)
 		{
 			HQ->AddActorToPoolList(this);
 		}
@@ -235,6 +356,15 @@ void AMotorcyclePawn::Internal_PushInThePool()
 void AMotorcyclePawn::Internal_PullFromThePool(FVector PullLocation)
 {
 	Super::Internal_PullFromThePool(PullLocation);
+
+	if (EngineAudioComponent && EngineLoopSound)
+	{
+		EngineAudioComponent->SetSound(EngineLoopSound);
+		EngineAudioComponent->AttenuationSettings = nullptr;
+		EngineAudioComponent->bOverrideAttenuation = true;
+		EngineAudioComponent->AttenuationOverrides.FalloffDistance = EngineSoundRadius;
+		EngineAudioComponent->Play();
+	}
 
 	MotorcycleMovementComponent->NewRepLocation = PullLocation;
 	MotorcycleMovementComponent->NewRepRotation = FRotator(0.0f, 0.0f, 0.0f);
@@ -270,23 +400,42 @@ void AMotorcyclePawn::Internal_PullFromThePool(FVector PullLocation)
 		}
 
 		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
+		if (HQ)
 		{
 			HQ->AddActorToAliveList(this);
+		}
 
-			ARaidSimulationBasePawn* Driver = HQ->SpawnActorAccordingToSoldierType(ESoldierType::MotorcycleDriver);
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+		if (!IsValid(AttachedDriver) && DriverClass)
+		{
+			AMotorcycleDriverPawn* Driver = GetWorld()->SpawnActor<AMotorcycleDriverPawn>(DriverClass, GetActorLocation(), FRotator::ZeroRotator, SpawnParams);
 			if (Driver)
 			{
 				Driver->ActorAttachToComponent(DriverSeatPoint);
-				AttachedDriver = Cast<AMotorcycleDriverPawn>(Driver);
+				AttachedDriver = Driver;
 			}
+		}
+		else if (IsValid(AttachedDriver))
+		{
+			AttachedDriver->PullFromThePool(DriverSeatPoint->GetComponentLocation());
+			AttachedDriver->ActorAttachToComponent(DriverSeatPoint);
+		}
 
-			ARaidSimulationBasePawn* Shooter = HQ->SpawnActorAccordingToSoldierType(ESoldierType::MotorcycleShooter);
+		if (!IsValid(AttachedShooter) && ShooterClass)
+		{
+			AMotorcycleShooterPawn* Shooter = GetWorld()->SpawnActor<AMotorcycleShooterPawn>(ShooterClass, GetActorLocation(), FRotator::ZeroRotator, SpawnParams);
 			if (Shooter)
 			{
 				Shooter->ActorAttachToComponent(GunnerSeatPoint);
-				AttachedShooter = Cast<AMotorcycleShooterPawn>(Shooter);
+				AttachedShooter = Shooter;
 			}
+		}
+		else if (IsValid(AttachedShooter))
+		{
+			AttachedShooter->PullFromThePool(GunnerSeatPoint->GetComponentLocation());
+			AttachedShooter->ActorAttachToComponent(GunnerSeatPoint);
 		}
 
 		if (AttachedDriver)
@@ -298,13 +447,13 @@ void AMotorcyclePawn::Internal_PullFromThePool(FVector PullLocation)
 			MotorcycleMovementComponent->AddIgnoredActorForTrace(AttachedShooter);
 		}
 
-		MotorcycleState = EMotorcycleState::Combat;
+		MotorcycleState = EMotorcycleState::Approaching;
 
 		MotorcycleMovementComponent->OnSplineEndReached.AddDynamic(this, &AMotorcyclePawn::OnSplineEndReached);
 
-		if (MotorcycleMovementComponent->GetCachedSplinePath())
+		if (HQ && HQ->GetApproachSpline())
 		{
-			MotorcycleMovementComponent->SetSplinePath(MotorcycleMovementComponent->GetCachedSplinePath(), true);
+			MotorcycleMovementComponent->SetSplinePath(HQ->GetApproachSpline(), true, false);
 		}
 	}
 }

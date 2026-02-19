@@ -14,6 +14,7 @@ class UMotorcycleMovementComponent;
 class AMotorcycleAIController;
 class AMotorcycleDriverPawn;
 class AMotorcycleShooterPawn;
+class UAudioComponent;
 
 UCLASS()
 class MOTORCYCLEAITASK_API AMotorcyclePawn : public ARaidSimulationBasePawn, public ISupplyInterface
@@ -73,6 +74,12 @@ public:
 
 protected:
 
+	UPROPERTY(EditDefaultsOnly, Category = "Crew")
+	TSubclassOf<AMotorcycleDriverPawn> DriverClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Crew")
+	TSubclassOf<AMotorcycleShooterPawn> ShooterClass;
+
 	UPROPERTY(Replicated)
 	TObjectPtr<AMotorcycleDriverPawn> AttachedDriver;
 
@@ -96,6 +103,8 @@ public:
 
 	void OnCrewMemberDied(ARaidSimulationBasePawn* DeadCrew);
 
+	void OnShooterAmmoDepleted();
+
 	UFUNCTION()
 	void OnSplineEndReached();
 
@@ -104,6 +113,21 @@ public://Supply Interface Overrides
 	virtual void SupplySoldier() override;
 
 protected:
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UAudioComponent> EngineAudioComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	TObjectPtr<USoundBase> EngineLoopSound;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	float EngineSoundRadius = 3000.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	TObjectPtr<USoundBase> ExplosionSound;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	float ExplosionSoundRadius = 5000.f;
 
 	virtual void Internal_OnDead(FName HitBoneName, FVector ImpactNormal) override;
 

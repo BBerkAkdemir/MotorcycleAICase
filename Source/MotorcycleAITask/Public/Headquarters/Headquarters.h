@@ -8,6 +8,7 @@
 #include "Headquarters.generated.h"
 
 class ARaidSimulationBasePawn;
+class ASplinePathActor;
 
 UCLASS()
 class MOTORCYCLEAITASK_API AHeadquarters : public AActor
@@ -62,8 +63,28 @@ protected:
 
 public:
 
+	const TArray<TObjectPtr<ARaidSimulationBasePawn>>& GetPool() const { return Pool; }
+
 	void AddActorToPoolList(ARaidSimulationBasePawn* Actor);
 	void AddActorToAliveList(ARaidSimulationBasePawn* Actor);
+
+protected:
+
+	UPROPERTY(EditInstanceOnly, Category = "Splines")
+	TObjectPtr<ASplinePathActor> ApproachSpline;
+
+	UPROPERTY(EditInstanceOnly, Category = "Splines")
+	TObjectPtr<ASplinePathActor> CombatSpline;
+
+	UPROPERTY(EditInstanceOnly, Category = "Splines")
+	TArray<TObjectPtr<ASplinePathActor>> EscapeSplines;
+
+public:
+
+	ASplinePathActor* GetApproachSpline() const { return ApproachSpline; }
+	ASplinePathActor* GetCombatSpline() const { return CombatSpline; }
+	ASplinePathActor* GetRandomEscapeSpline() const;
+	const TArray<TObjectPtr<ASplinePathActor>>& GetEscapeSplines() const { return EscapeSplines; }
 
 	UFUNCTION()
 	ARaidSimulationBasePawn* SpawnActorAccordingToSoldierType(ESoldierType GetSoldierType);

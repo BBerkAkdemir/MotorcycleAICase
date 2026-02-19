@@ -10,16 +10,19 @@
 
 #pragma region InProjectIncludes
 
-#include "Headquarters/Headquarters.h"
 #include "Motorcycle/MotorcyclePawn.h"
 #include "Motorcycle/Components/MotorcycleMovementComponent.h"
 #include "Perception/AIPerceptionStimuliSourceComponent.h"
+#include "Pawns/AIControllers/MotorcycleDriverAIController.h"
 
 #pragma endregion
 
 AMotorcycleDriverPawn::AMotorcycleDriverPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	MaxHealth = 120.f;
+	Health = MaxHealth;
+	AIControllerClass = AMotorcycleDriverAIController::StaticClass();
 
 	if (PerceptionStimuliSource)
 	{
@@ -45,6 +48,7 @@ AMotorcycleDriverPawn::AMotorcycleDriverPawn()
 	SkeletalMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
 	SkeletalMesh->SetGenerateOverlapEvents(false);
 	SkeletalMesh->SetRelativeLocation(FVector(0, 0, -50.0f));
+	SkeletalMesh->SetRelativeRotation(FRotator(0, -90.0f, 0));
 	SkeletalMesh->SetCanEverAffectNavigation(false);
 }
 
@@ -53,7 +57,8 @@ void AMotorcycleDriverPawn::BeginPlay()
 	Super::BeginPlay();
 	if (HasAuthority())
 	{
-		GetWorldTimerManager().SetTimer(TH_ReplicationDelay, this, &AMotorcycleDriverPawn::PushInThePool, 2, false);
+		PoolState = EPawnPoolState::Alive;
+		Health = MaxHealth;
 	}
 }
 
@@ -70,7 +75,9 @@ void AMotorcycleDriverPawn::Internal_OnDead(FName HitBoneName, FVector ImpactNor
 		}
 	}
 
-	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::PhysicsOnly);
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	SkeletalMesh->SetSimulatePhysics(true);
 	SkeletalMesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
 	if (HitBoneName != NAME_None)
@@ -86,48 +93,32 @@ void AMotorcycleDriverPawn::Internal_PushInThePool()
 {
 	Super::Internal_PushInThePool();
 
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SkeletalMesh->SetSimulatePhysics(false);
-	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, 0, 0));
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, -90, 0));
 	SkeletalMesh->SetActive(false, true);
 	SkeletalMesh->SetVisibility(false);
 
 	CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CapsuleComponent->SetActive(false);
-
-	if (HasAuthority())
-	{
-		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
-		{
-			HQ->AddActorToPoolList(this);
-		}
-	}
 }
 
 void AMotorcycleDriverPawn::Internal_PullFromThePool(FVector PullLocation)
 {
 	Super::Internal_PullFromThePool(PullLocation);
 
-	SetActorLocationAndRotation(PullLocation, FRotator(0.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
-
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SkeletalMesh->SetSimulatePhysics(false);
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, -90, 0));
 	SkeletalMesh->SetActive(true, true);
 	SkeletalMesh->SetVisibility(true);
 
 	CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CapsuleComponent->SetActive(true);
-
-	if (HasAuthority())
-	{
-		AHeadquarters* HQ = GetOwningHeadquarters();
-		if (HQ && HQ->GetHeadquartersParty() == EPartyType::Friendly)
-		{
-			HQ->AddActorToAliveList(this);
-		}
-	}
 }
 
 void AMotorcycleDriverPawn::ActorAttachToComponent(USceneComponent* AttachedComponent)

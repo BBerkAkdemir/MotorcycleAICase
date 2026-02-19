@@ -59,6 +59,7 @@ protected:
 
 	float CurrentSplineDistance = 0.f;
 	bool bSplineForward = true;
+	bool bLoopSpline = false;
 	FVector SplineTargetLocation;
 
 	UPROPERTY(EditAnywhere, Category = "Spline")
@@ -86,7 +87,7 @@ public:
 	void ActivateMovement();
 	void DeactivateMovement();
 
-	void SetSplinePath(ASplinePathActor* SplinePath, bool bForward);
+	void SetSplinePath(ASplinePathActor* SplinePath, bool bForward, bool bLoop = false);
 	void SetFollowTarget(AActor* Target);
 	ASplinePathActor* GetCachedSplinePath() const { return CachedSplinePath; }
 

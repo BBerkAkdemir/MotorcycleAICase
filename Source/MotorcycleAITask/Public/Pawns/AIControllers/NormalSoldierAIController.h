@@ -6,12 +6,14 @@
 #include "AIController.h"
 #include "GameplayTagContainer.h"
 #include "Perception/AIPerceptionTypes.h"
+#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "NormalSoldierAIController.generated.h"
 
 class UStateTreeComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 class ANormalSoldierPawn;
+class UEnvQuery;
 
 UCLASS()
 class MOTORCYCLEAITASK_API ANormalSoldierAIController : public AAIController
@@ -75,6 +77,14 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	float RetreatMoveDistance = 400.f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|EQS")
+	TObjectPtr<UEnvQuery> RetreatEQS;
+
+	bool bIsRunningRetreatQuery = false;
+
+	void RunRetreatQuery();
+	void OnRetreatQueryFinished(TSharedPtr<FEnvQueryResult> Result);
 
 public:
 

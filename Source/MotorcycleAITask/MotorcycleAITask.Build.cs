@@ -8,6 +8,6 @@ public class MotorcycleAITask : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "StateTreeModule", "GameplayStateTreeModule", "AIModule", "GameplayTags", "NavigationSystem" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "StateTreeModule", "GameplayStateTreeModule", "AIModule", "GameplayTags", "NavigationSystem", "Niagara" });
     }
 }

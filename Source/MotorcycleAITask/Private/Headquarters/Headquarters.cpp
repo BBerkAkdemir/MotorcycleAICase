@@ -18,8 +18,10 @@
 #include "Pawns/RaidSimulationBasePawn.h"
 #include "Motorcycle/MotorcyclePawn.h"
 #include "Motorcycle/Components/MotorcycleMovementComponent.h"
+#include "Motorcycle/SplinePathActor.h"
 #include "Pawns/NormalSoldierPawn.h"
 #include "Pawns/Components/SoldierMovementComponent.h"
+#include "NavigationSystem.h"
 
 #pragma endregion
 
@@ -111,26 +113,18 @@ void AHeadquarters::BeginPlay()
 
 void AHeadquarters::PullFromPoolTryDelay()
 {
-	SpawnActorAccordingToSoldierType(ESoldierType::Motorcycle);
-	SpawnActorAccordingToSoldierType(ESoldierType::NormalShooter);
+	ESoldierType SpawnType = (HeadquartersParty == EPartyType::Friendly) ? ESoldierType::Motorcycle : ESoldierType::NormalShooter;
+	SpawnActorAccordingToSoldierType(SpawnType);
 
 	GetWorldTimerManager().SetTimer(TH_ContinuousSpawn, this, &AHeadquarters::ContinuousSpawnTick, SpawnInterval, true);
 }
 
 void AHeadquarters::ContinuousSpawnTick()
 {
-	for (int32 i = 0; i < Pool.Num(); i++)
+	for (int32 i = SoldiersOnAliveIndexes.Num() - 1; i >= 0; --i)
 	{
-		if (IsValid(Pool[i]) && Pool[i]->GetPoolState() == EPawnPoolState::Dead)
-		{
-			Pool[i]->PushInThePool();
-		}
-	}
-
-	for (int32 i = SoldiersOnAliveIndexes.Num() - 1; i >= 0; i--)
-	{
-		int32 AliveIndex = SoldiersOnAliveIndexes[i];
-		if (!Pool.IsValidIndex(AliveIndex) || !IsValid(Pool[AliveIndex]) || Pool[AliveIndex]->GetPoolState() != EPawnPoolState::Alive)
+		int32 Idx = SoldiersOnAliveIndexes[i];
+		if (!Pool.IsValidIndex(Idx) || !IsValid(Pool[Idx]) || Pool[Idx]->GetPoolState() != EPawnPoolState::Alive)
 		{
 			SoldiersOnAliveIndexes.RemoveAtSwap(i);
 		}
@@ -138,15 +132,27 @@ void AHeadquarters::ContinuousSpawnTick()
 
 	if (SoldiersOnAliveIndexes.Num() >= MaxAliveCount)
 	{
+		GetWorldTimerManager().ClearTimer(TH_ContinuousSpawn);
 		return;
 	}
 
-	SpawnActorAccordingToSoldierType(ESoldierType::Motorcycle);
-
-	if (SoldiersOnAliveIndexes.Num() < MaxAliveCount)
+	bool bHasInPool = false;
+	for (int32 i = 0; i < Pool.Num(); i++)
 	{
-		SpawnActorAccordingToSoldierType(ESoldierType::NormalShooter);
+		if (IsValid(Pool[i]) && Pool[i]->GetPoolState() == EPawnPoolState::InPool)
+		{
+			bHasInPool = true;
+			break;
+		}
 	}
+
+	if (!bHasInPool)
+	{
+		return;
+	}
+
+	ESoldierType SpawnType = (HeadquartersParty == EPartyType::Friendly) ? ESoldierType::Motorcycle : ESoldierType::NormalShooter;
+	SpawnActorAccordingToSoldierType(SpawnType);
 }
 
 void AHeadquarters::Tick(float DeltaTime)
@@ -164,6 +170,11 @@ void AHeadquarters::AddActorToPoolList(ARaidSimulationBasePawn* Actor)
 	if (RemoveIndex != INDEX_NONE)
 	{
 		SoldiersOnAliveIndexes.RemoveAtSwap(RemoveIndex);
+	}
+
+	if (!GetWorldTimerManager().IsTimerActive(TH_ContinuousSpawn))
+	{
+		GetWorldTimerManager().SetTimer(TH_ContinuousSpawn, this, &AHeadquarters::ContinuousSpawnTick, SpawnInterval, true);
 	}
 }
 
@@ -183,12 +194,35 @@ ARaidSimulationBasePawn* AHeadquarters::SpawnActorAccordingToSoldierType(ESoldie
 
 		if (Pool[i]->SoldierType == GetSoldierType && Pool[i]->GetPoolState() == EPawnPoolState::InPool)
 		{
-			Pool[i]->PullFromThePool(GetActorLocation() + FVector(250, UKismetMathLibrary::RandomFloatInRange(-200, 200), 100));
+			FVector SpawnLocation = GetActorLocation() + FVector(250, UKismetMathLibrary::RandomFloatInRange(-200, 200), 0);
+
+			UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+			if (NavSys)
+			{
+				FNavLocation ProjectedLocation;
+				if (NavSys->ProjectPointToNavigation(SpawnLocation, ProjectedLocation, FVector(500, 500, 500)))
+				{
+					SpawnLocation = ProjectedLocation.Location;
+				}
+			}
+			SpawnLocation.Z += 100.f;
+
+			Pool[i]->PullFromThePool(SpawnLocation);
 			return Pool[i];
 		}
 	}
 
 	return nullptr;
+}
+
+ASplinePathActor* AHeadquarters::GetRandomEscapeSpline() const
+{
+	if (EscapeSplines.IsEmpty())
+	{
+		return nullptr;
+	}
+	int32 Index = FMath::RandRange(0, EscapeSplines.Num() - 1);
+	return EscapeSplines[Index];
 }
 
 void AHeadquarters::TickFrameReplication()

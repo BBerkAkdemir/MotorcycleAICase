@@ -8,6 +8,8 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "NavigationSystem.h"
+#include "EnvironmentQuery/EnvQueryManager.h"
+#include "DrawDebugHelpers.h"
 
 #include "Pawns/MotorcycleShooterPawn.h"
 #include "Pawns/NormalSoldierPawn.h"
@@ -65,6 +67,7 @@ void ANormalSoldierAIController::OnUnPossess()
 	CacheSightControlPlayer = nullptr;
 	SightActor = nullptr;
 	SightActors.Empty();
+	bIsRunningRetreatQuery = false;
 }
 
 ETeamAttitude::Type ANormalSoldierAIController::GetTeamAttitudeTowards(const AActor& Other) const
@@ -130,7 +133,6 @@ void ANormalSoldierAIController::OnTargetPerceptionUpdated(AActor* Actor, FAISti
 			SightActor = nullptr;
 			if (ControlledPawn)
 			{
-				ControlledPawn->SetIsFiring(false);
 				ControlledPawn->SetFireTarget(nullptr);
 			}
 			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Patrol);
@@ -147,7 +149,12 @@ void ANormalSoldierAIController::DistanceControl()
 {
 	SightActors.RemoveAll([](const TWeakObjectPtr<AActor>& WeakActor)
 	{
-		return !WeakActor.IsValid();
+		if (!WeakActor.IsValid())
+		{
+			return true;
+		}
+		ARaidSimulationBasePawn* Pawn = Cast<ARaidSimulationBasePawn>(WeakActor.Get());
+		return Pawn && Pawn->GetPoolState() != EPawnPoolState::Alive;
 	});
 
 	MostNearlyLength = TNumericLimits<float>::Max();
@@ -171,20 +178,13 @@ void ANormalSoldierAIController::DistanceControl()
 				if (ControlledPawn)
 				{
 					ControlledPawn->SetFireTarget(SightActor);
-					ControlledPawn->SetIsFiring(true);
 				}
-			}
-			else if (ControlledPawn && !ControlledPawn->GetIsFiring())
-			{
-				ControlledPawn->SetIsFiring(true);
 			}
 
 			float DistToTarget = FVector::Dist(SightActor->GetActorLocation(), ControlledPawn->GetActorLocation());
 			if (DistToTarget < RetreatDistance)
 			{
-				FVector AwayDir = (ControlledPawn->GetActorLocation() - SightActor->GetActorLocation()).GetSafeNormal();
-				FVector RetreatPos = ControlledPawn->GetActorLocation() + AwayDir * RetreatMoveDistance;
-				MoveToLocation(RetreatPos, 50.f);
+				RunRetreatQuery();
 			}
 			else
 			{
@@ -197,7 +197,6 @@ void ANormalSoldierAIController::DistanceControl()
 			SightActor = nullptr;
 			if (ControlledPawn)
 			{
-				ControlledPawn->SetIsFiring(false);
 				ControlledPawn->SetFireTarget(nullptr);
 			}
 			StateTreeAIComponent->SendStateTreeEvent(GameplayTag_Patrol);
@@ -210,6 +209,12 @@ void ANormalSoldierAIController::MostNearlyControl(AActor* Actor)
 {
 	if (Actor && ControlledPawn)
 	{
+		ARaidSimulationBasePawn* TargetPawn = Cast<ARaidSimulationBasePawn>(Actor);
+		if (TargetPawn && TargetPawn->GetPoolState() != EPawnPoolState::Alive)
+		{
+			return;
+		}
+
 		float DistSquared = FVector::DistSquared(Actor->GetActorLocation(), ControlledPawn->GetActorLocation());
 		if (DistSquared < MostNearlyLength)
 		{
@@ -249,5 +254,68 @@ void ANormalSoldierAIController::PatrolNavigate()
 	if (bFound)
 	{
 		MoveToLocation(RandomLocation.Location, 50.f);
+	}
+}
+
+void ANormalSoldierAIController::RunRetreatQuery()
+{
+	if (!ControlledPawn || !SightActor)
+	{
+		return;
+	}
+
+	if (!RetreatEQS)
+	{
+		FVector AwayDir = (ControlledPawn->GetActorLocation() - SightActor->GetActorLocation()).GetSafeNormal();
+		FVector RetreatPos = ControlledPawn->GetActorLocation() + AwayDir * RetreatMoveDistance;
+		MoveToLocation(RetreatPos, 50.f);
+#if ENABLE_DRAW_DEBUG
+		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Orange, false, 2.f);
+		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Orange, false, 2.f, 0, 1.5f);
+#endif
+		return;
+	}
+
+	if (bIsRunningRetreatQuery)
+	{
+		return;
+	}
+
+#if ENABLE_DRAW_DEBUG
+	DrawDebugSphere(GetWorld(), ControlledPawn->GetActorLocation(), 20.f, 8, FColor::Yellow, false, 1.5f);
+#endif
+
+	FEnvQueryRequest Request(RetreatEQS, ControlledPawn);
+	Request.Execute(EEnvQueryRunMode::SingleResult, this, &ANormalSoldierAIController::OnRetreatQueryFinished);
+	bIsRunningRetreatQuery = true;
+}
+
+void ANormalSoldierAIController::OnRetreatQueryFinished(TSharedPtr<FEnvQueryResult> Result)
+{
+	bIsRunningRetreatQuery = false;
+
+	if (!ControlledPawn || !SightActor)
+	{
+		return;
+	}
+
+	if (Result && Result->IsSuccessful())
+	{
+		FVector RetreatPos = Result->GetItemAsLocation(0);
+		MoveToLocation(RetreatPos, 50.f);
+#if ENABLE_DRAW_DEBUG
+		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Green, false, 3.f);
+		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Green, false, 3.f, 0, 1.5f);
+#endif
+	}
+	else
+	{
+		FVector AwayDir = (ControlledPawn->GetActorLocation() - SightActor->GetActorLocation()).GetSafeNormal();
+		FVector RetreatPos = ControlledPawn->GetActorLocation() + AwayDir * RetreatMoveDistance;
+		MoveToLocation(RetreatPos, 50.f);
+#if ENABLE_DRAW_DEBUG
+		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Red, false, 3.f);
+		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Red, false, 3.f, 0, 1.5f);
+#endif
 	}
 }

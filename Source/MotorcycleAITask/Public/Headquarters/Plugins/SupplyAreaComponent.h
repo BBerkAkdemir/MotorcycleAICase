@@ -16,14 +16,8 @@ public:
 
 	USupplyAreaComponent();
 
-	void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
 protected:
 	virtual void BeginPlay() override;
-
-public:
-
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
 
@@ -31,12 +25,12 @@ public:
 
 protected:
 
-	UPROPERTY(EditAnywhere, Replicated)
+	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> AreaMesh;
 
 protected:
 
-	// Overlap Fonksiyonlarý
+	// Overlap Fonksiyonlarï¿½
 	UFUNCTION()
 	void OnMeshBeginOverlap(
 		UPrimitiveComponent* OverlappedComponent,

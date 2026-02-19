@@ -11,6 +11,7 @@ class UFloatingPawnMovement;
 class USoldierMovementComponent;
 class ANormalSoldierAIController;
 class UNormalSoldierAnimInstance;
+class UAudioComponent;
 
 UCLASS()
 class MOTORCYCLEAITASK_API ANormalSoldierPawn : public ARaidSimulationBasePawn
@@ -50,25 +51,34 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UNormalSoldierAnimInstance> AnimInstance;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_IsFiring)
 	bool bIsFiring = false;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_FireTarget)
 	TObjectPtr<AActor> FireTarget;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
 	float FireRate = 0.5f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
-	float FireDamage = 8.f;
+	float FireDamage = 6.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
 	float FireRange = 1500.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
-	float FireSpreadAngle = 5.f;
+	float FireSpreadAngle = 3.f;
 
 	FTimerHandle TH_Fire;
+
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<UAudioComponent> FireAudioComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	TObjectPtr<USoundBase> FireLoopSound;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	float FireSoundRadius = 2000.f;
 
 public:
 
@@ -83,13 +93,21 @@ public:
 	void SetIsFiring(bool bNewFiring);
 
 	AActor* GetFireTarget() const { return FireTarget; }
-	void SetFireTarget(AActor* NewTarget) { FireTarget = NewTarget; }
+	void SetFireTarget(AActor* NewTarget);
+
+	UFUNCTION()
+	void OnRep_IsFiring();
+
+	UFUNCTION()
+	void OnRep_FireTarget();
 
 	void StartFiring();
 	void StopFiring();
 	void PerformFire();
 
 public:
+
+	virtual USceneComponent* GetMuzzleComponent() const override { return WeaponMesh; }
 
 	virtual void Internal_OnDead(FName HitBoneName, FVector ImpactNormal) override;
 

@@ -5,6 +5,7 @@
 #pragma region UnrealComponents
 
 #include "Components/CapsuleComponent.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Net/UnrealNetwork.h"
@@ -48,7 +49,7 @@ ANormalSoldierPawn::ANormalSoldierPawn()
 	SkeletalMesh->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
 	SkeletalMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
 	SkeletalMesh->SetGenerateOverlapEvents(false);
-	SkeletalMesh->SetRelativeLocation(FVector(0, 0, -50.0f));
+	SkeletalMesh->SetRelativeLocation(FVector(0, 0, -90.0f));
 	SkeletalMesh->SetCanEverAffectNavigation(false);
 
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
@@ -67,6 +68,10 @@ ANormalSoldierPawn::ANormalSoldierPawn()
 	PawnMovement->TurningBoost = 0;
 
 	SoldierMovement = CreateDefaultSubobject<USoldierMovementComponent>(TEXT("SoldierMovementComponent"));
+
+	FireAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FireAudioComponent"));
+	FireAudioComponent->SetupAttachment(RootComponent);
+	FireAudioComponent->bAutoActivate = false;
 }
 
 void ANormalSoldierPawn::BeginPlay()
@@ -77,6 +82,41 @@ void ANormalSoldierPawn::BeginPlay()
 		GetWorldTimerManager().SetTimer(TH_ReplicationDelay, this, &ANormalSoldierPawn::PushInThePool, 2, false);
 	}
 	AnimInstance = Cast<UNormalSoldierAnimInstance>(SkeletalMesh->GetAnimInstance());
+}
+
+void ANormalSoldierPawn::OnRep_IsFiring()
+{
+	if (bIsFiring)
+	{
+		if (FireAudioComponent && FireLoopSound)
+		{
+			FireAudioComponent->SetSound(FireLoopSound);
+			FireAudioComponent->AttenuationSettings = nullptr;
+			FireAudioComponent->bOverrideAttenuation = true;
+			FireAudioComponent->AttenuationOverrides.FalloffDistance = FireSoundRadius;
+			FireAudioComponent->Play();
+		}
+	}
+	else
+	{
+		if (FireAudioComponent)
+		{
+			FireAudioComponent->Stop();
+		}
+	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(bIsFiring);
+	}
+}
+
+void ANormalSoldierPawn::OnRep_FireTarget()
+{
+	if (AnimInstance)
+	{
+		AnimInstance->SetTarget(FireTarget);
+	}
 }
 
 void ANormalSoldierPawn::SetIsFiring(bool bNewFiring)
@@ -91,6 +131,20 @@ void ANormalSoldierPawn::SetIsFiring(bool bNewFiring)
 		bIsFiring = false;
 		StopFiring();
 	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(bIsFiring);
+	}
+}
+
+void ANormalSoldierPawn::SetFireTarget(AActor* NewTarget)
+{
+	FireTarget = NewTarget;
+	if (AnimInstance)
+	{
+		AnimInstance->SetTarget(NewTarget);
+	}
 }
 
 void ANormalSoldierPawn::StartFiring()
@@ -99,6 +153,15 @@ void ANormalSoldierPawn::StartFiring()
 	{
 		GetWorldTimerManager().SetTimer(TH_Fire, this, &ANormalSoldierPawn::PerformFire, FireRate, true);
 	}
+
+	if (FireAudioComponent && FireLoopSound)
+	{
+		FireAudioComponent->SetSound(FireLoopSound);
+		FireAudioComponent->AttenuationSettings = nullptr;
+		FireAudioComponent->bOverrideAttenuation = true;
+		FireAudioComponent->AttenuationOverrides.FalloffDistance = FireSoundRadius;
+		FireAudioComponent->Play();
+	}
 }
 
 void ANormalSoldierPawn::StopFiring()
@@ -106,6 +169,11 @@ void ANormalSoldierPawn::StopFiring()
 	if (HasAuthority())
 	{
 		GetWorldTimerManager().ClearTimer(TH_Fire);
+	}
+
+	if (FireAudioComponent)
+	{
+		FireAudioComponent->Stop();
 	}
 }
 
@@ -116,8 +184,9 @@ void ANormalSoldierPawn::PerformFire()
 		return;
 	}
 
-	FVector MuzzleLocation = WeaponMesh->GetComponentLocation();
-	FVector DirectionToTarget = (FireTarget->GetActorLocation() - MuzzleLocation).GetSafeNormal();
+	FVector MuzzleLocation = CapsuleComponent->GetComponentLocation();
+	FVector TargetLocation = FireTarget->GetActorLocation() + FVector(0, 0, 50);
+	FVector DirectionToTarget = (TargetLocation - MuzzleLocation).GetSafeNormal();
 
 	float SpreadRad = FMath::DegreesToRadians(FireSpreadAngle);
 	DirectionToTarget = FMath::VRandCone(DirectionToTarget, SpreadRad);
@@ -126,6 +195,18 @@ void ANormalSoldierPawn::PerformFire()
 
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(this);
+
+	AHeadquarters* HQ = GetOwningHeadquarters();
+	if (HQ)
+	{
+		for (ARaidSimulationBasePawn* PoolPawn : HQ->GetPool())
+		{
+			if (IsValid(PoolPawn))
+			{
+				QueryParams.AddIgnoredActor(PoolPawn);
+			}
+		}
+	}
 
 	FHitResult HitResult;
 	bool bHit = GetWorld()->LineTraceSingleByChannel(
@@ -142,8 +223,31 @@ void ANormalSoldierPawn::PerformFire()
 		if (HitPawn)
 		{
 			HitPawn->DamageControl(FireDamage, HitResult.BoneName, DirectionToTarget, HitResult.ImpactNormal);
+			MulticastRPC_OnHitVisual(HitResult.ImpactPoint, HitResult.ImpactNormal);
+			MulticastRPC_OnFireVisual(MuzzleLocation, HitResult.ImpactPoint);
+			return;
 		}
-		MulticastRPC_OnHitVisual(HitResult.ImpactPoint, HitResult.ImpactNormal);
+	}
+
+	float DistToTarget = FVector::Dist(MuzzleLocation, TargetLocation);
+	float HitDist = bHit ? HitResult.Distance : FireRange;
+
+	if (HitDist >= DistToTarget * 0.9f)
+	{
+		FVector ClosestPoint = FMath::ClosestPointOnSegment(TargetLocation, MuzzleLocation, TraceEnd);
+		float ProximityDist = FVector::Dist(ClosestPoint, TargetLocation);
+
+		if (ProximityDist <= 75.f)
+		{
+			ARaidSimulationBasePawn* TargetPawn = Cast<ARaidSimulationBasePawn>(FireTarget);
+			if (TargetPawn)
+			{
+				TargetPawn->DamageControl(FireDamage, NAME_None, DirectionToTarget, -DirectionToTarget);
+				MulticastRPC_OnHitVisual(TargetLocation, -DirectionToTarget);
+				MulticastRPC_OnFireVisual(MuzzleLocation, TargetLocation);
+				return;
+			}
+		}
 	}
 
 	MulticastRPC_OnFireVisual(MuzzleLocation, bHit ? HitResult.ImpactPoint : TraceEnd);
@@ -153,16 +257,32 @@ void ANormalSoldierPawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal
 {
 	Super::Internal_OnDead(HitBoneName, ImpactNormal);
 
-	StopFiring();
-	bIsFiring = false;
-	FireTarget = nullptr;
-
-	if (HasAuthority() && IsValid(AIControllerComponent))
+	if (FireAudioComponent)
 	{
-		AIControllerComponent->UnPossess();
+		FireAudioComponent->Stop();
 	}
 
-	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::PhysicsOnly);
+	if (HasAuthority())
+	{
+		StopFiring();
+		bIsFiring = false;
+		FireTarget = nullptr;
+
+		if (IsValid(AIControllerComponent))
+		{
+			AIControllerComponent->UnPossess();
+		}
+	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(false);
+		AnimInstance->SetTarget(nullptr);
+	}
+
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	SkeletalMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	SkeletalMesh->SetSimulatePhysics(true);
 	SkeletalMesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
 	if (HitBoneName != NAME_None)
@@ -181,15 +301,31 @@ void ANormalSoldierPawn::Internal_PushInThePool()
 {
 	Super::Internal_PushInThePool();
 
-	StopFiring();
-	bIsFiring = false;
-	FireTarget = nullptr;
+	if (FireAudioComponent)
+	{
+		FireAudioComponent->Stop();
+	}
 
-	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (HasAuthority())
+	{
+		StopFiring();
+		bIsFiring = false;
+		FireTarget = nullptr;
+	}
+
+	if (AnimInstance)
+	{
+		AnimInstance->SetIsFireStart(false);
+		AnimInstance->SetTarget(nullptr);
+	}
+
 	SkeletalMesh->SetSimulatePhysics(false);
-	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, 0, 0));
-	SkeletalMesh->SetActive(false, true);
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -90.f), FRotator(0, 0, 0));
 	SkeletalMesh->SetVisibility(false);
+	SkeletalMesh->SetActive(false, false);
 
 	CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CapsuleComponent->SetActive(false);
@@ -226,10 +362,12 @@ void ANormalSoldierPawn::Internal_PullFromThePool(FVector PullLocation)
 	PawnMovement->Velocity = FVector(0.0f, 0.0f, 0.0f);
 	SetActorLocationAndRotation(PullLocation, FRotator(0.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
 
-	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SkeletalMesh->SetActive(true, false);
 	SkeletalMesh->SetSimulatePhysics(false);
-	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -50.f), FRotator(0, -90, 0));
-	SkeletalMesh->SetActive(true, true);
+	SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SkeletalMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	SkeletalMesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -90.f), FRotator(0, -90, 0));
 	SkeletalMesh->SetVisibility(true);
 
 	CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);

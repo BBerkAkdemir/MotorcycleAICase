@@ -34,8 +34,9 @@ UENUM(BlueprintType)
 enum class EMotorcycleState : uint8
 {
 	Idle,
+	Approaching,
 	Combat,
-	ReturningToHQ,
+	Escaping,
 	Resupplying,
 	Stopped
 };

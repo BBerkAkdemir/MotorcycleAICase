@@ -1,6 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Pawns/RaidSimulationBasePawn.h"
+#include "Headquarters/Headquarters.h"
+#include "NiagaraFunctionLibrary.h"
 
 #pragma region Multiplayer Libraries
 
@@ -108,12 +110,33 @@ void ARaidSimulationBasePawn::ReturnToPoolAfterDeath()
 	}
 }
 
+void ARaidSimulationBasePawn::CancelPendingPoolReturn()
+{
+	GetWorldTimerManager().ClearTimer(TH_DeathToPool);
+}
+
 void ARaidSimulationBasePawn::MulticastRPC_OnFireVisual_Implementation(FVector MuzzleLocation, FVector HitLocation)
 {
+	if (MuzzleFlashEffect)
+	{
+		USceneComponent* MuzzleComp = GetMuzzleComponent();
+		if (MuzzleComp)
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAttached(MuzzleFlashEffect, MuzzleComp, NAME_None, FVector::ZeroVector, FRotator::ZeroRotator, EAttachLocation::SnapToTarget, true);
+		}
+		else
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, MuzzleFlashEffect, MuzzleLocation);
+		}
+	}
 }
 
 void ARaidSimulationBasePawn::MulticastRPC_OnHitVisual_Implementation(FVector HitLocation, FVector HitNormal)
 {
+	if (HitBloodEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, HitBloodEffect, HitLocation, HitNormal.Rotation());
+	}
 }
 
 void ARaidSimulationBasePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
@@ -161,10 +184,23 @@ void ARaidSimulationBasePawn::MulticastRPC_PullFromThePool_Implementation(FVecto
 
 void ARaidSimulationBasePawn::Internal_PushInThePool()
 {
+	if (PerceptionStimuliSource && PerceptionStimuliSource->IsRegistered())
+	{
+		PerceptionStimuliSource->UnregisterComponent();
+	}
 }
 
 void ARaidSimulationBasePawn::Internal_PullFromThePool(FVector PullLocation)
 {
+	if (PerceptionStimuliSource && !PerceptionStimuliSource->IsRegistered() && PerceptionStimuliSource->bAutoRegister)
+	{
+		PerceptionStimuliSource->RegisterComponent();
+	}
+}
+
+void ARaidSimulationBasePawn::SetOwningHeadquarters(AHeadquarters* HQ)
+{
+	CachedHeadquarters = HQ;
 }
 
 void ARaidSimulationBasePawn::ActorAttachToComponent(USceneComponent* AttachedComponent)

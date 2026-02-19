@@ -9,6 +9,7 @@
 
 class AHeadquarters;
 class UAIPerceptionStimuliSourceComponent;
+class UNiagaraSystem;
 
 UCLASS()
 class MOTORCYCLEAITASK_API ARaidSimulationBasePawn : public APawn
@@ -64,7 +65,7 @@ public:
 	EPawnPoolState GetPoolState() const { return PoolState; }
 
 	AHeadquarters* GetOwningHeadquarters() const { return CachedHeadquarters.Get(); }
-	void SetOwningHeadquarters(AHeadquarters* HQ) { CachedHeadquarters = HQ; }
+	void SetOwningHeadquarters(AHeadquarters* HQ);
 
 public:
 
@@ -77,9 +78,23 @@ protected:
 
 	FTimerHandle TH_DeathToPool;
 
+public:
+
 	void ReturnToPoolAfterDeath();
 
+	void CancelPendingPoolReturn();
+
+	void HealToMax() { Health = MaxHealth; }
+
 public:
+
+	UPROPERTY(EditDefaultsOnly, Category = "VFX")
+	TObjectPtr<UNiagaraSystem> HitBloodEffect;
+
+	UPROPERTY(EditDefaultsOnly, Category = "VFX")
+	TObjectPtr<UNiagaraSystem> MuzzleFlashEffect;
+
+	virtual USceneComponent* GetMuzzleComponent() const { return nullptr; }
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastRPC_OnFireVisual(FVector MuzzleLocation, FVector HitLocation);
