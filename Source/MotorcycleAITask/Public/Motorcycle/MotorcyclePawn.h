@@ -15,6 +15,7 @@ class AMotorcycleAIController;
 class AMotorcycleDriverPawn;
 class AMotorcycleShooterPawn;
 class UAudioComponent;
+class UNiagaraSystem;
 
 UCLASS()
 class MOTORCYCLEAITASK_API AMotorcyclePawn : public ARaidSimulationBasePawn, public ISupplyInterface
@@ -128,6 +129,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Audio")
 	float ExplosionSoundRadius = 5000.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "VFX")
+	TObjectPtr<UNiagaraSystem> ExplosionEffect;
 
 	virtual void Internal_OnDead(FName HitBoneName, FVector ImpactNormal) override;
 

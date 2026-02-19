@@ -141,6 +141,10 @@ void ARaidSimulationBasePawn::MulticastRPC_OnHitVisual_Implementation(FVector Hi
 
 void ARaidSimulationBasePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
 {
+	if (PerceptionStimuliSource && PerceptionStimuliSource->IsRegistered())
+	{
+		PerceptionStimuliSource->UnregisterComponent();
+	}
 }
 
 void ARaidSimulationBasePawn::PushInThePool()

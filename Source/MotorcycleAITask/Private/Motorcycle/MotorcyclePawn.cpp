@@ -9,6 +9,7 @@
 #include "GameFramework/FloatingPawnMovement.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 
 #pragma endregion
 
@@ -42,7 +43,7 @@ AMotorcyclePawn::AMotorcyclePawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
-	MaxHealth = 375.f;
+	MaxHealth = 600.f;
 	Health = MaxHealth;
 
 	if (PerceptionStimuliSource)
@@ -141,7 +142,7 @@ void AMotorcyclePawn::OnSplineEndReached()
 
 void AMotorcyclePawn::OnCrewMemberDied(ARaidSimulationBasePawn* DeadCrew)
 {
-	if (!HasAuthority())
+	if (!HasAuthority() || PoolState == EPawnPoolState::Dead)
 	{
 		return;
 	}
@@ -150,12 +151,17 @@ void AMotorcyclePawn::OnCrewMemberDied(ARaidSimulationBasePawn* DeadCrew)
 	{
 		MotorcycleState = EMotorcycleState::Stopped;
 		MotorcycleMovementComponent->DeactivateMovement();
-		GetWorldTimerManager().SetTimer(TH_DeathToPool, this, &ARaidSimulationBasePawn::ReturnToPoolAfterDeath, DeathToPoolDelay, false);
+
+		if (!IsValid(AttachedShooter) || AttachedShooter->GetPoolState() != EPawnPoolState::Alive)
+		{
+			GetWorldTimerManager().SetTimer(TH_DeathToPool, this, &ARaidSimulationBasePawn::ReturnToPoolAfterDeath, DeathToPoolDelay, false);
+		}
 	}
 	else if (DeadCrew == AttachedShooter)
 	{
 		if (MotorcycleState == EMotorcycleState::Stopped)
 		{
+			GetWorldTimerManager().SetTimer(TH_DeathToPool, this, &ARaidSimulationBasePawn::ReturnToPoolAfterDeath, DeathToPoolDelay, false);
 			return;
 		}
 
@@ -265,6 +271,13 @@ void AMotorcyclePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
 		UGameplayStatics::PlaySoundAtLocation(this, ExplosionSound, GetActorLocation());
 	}
 
+	if (ExplosionEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, ExplosionEffect, GetActorLocation());
+	}
+
+	Mesh->SetVisibility(false);
+
 	if (HasAuthority())
 	{
 		if (IsValid(AIControllerComponent))
@@ -272,15 +285,15 @@ void AMotorcyclePawn::Internal_OnDead(FName HitBoneName, FVector ImpactNormal)
 			AIControllerComponent->UnPossess();
 		}
 
-		if (IsValid(AttachedDriver) && AttachedDriver->GetPoolState() != EPawnPoolState::InPool)
+		if (IsValid(AttachedDriver) && AttachedDriver->GetPoolState() == EPawnPoolState::Alive)
 		{
-			AttachedDriver->CancelPendingPoolReturn();
-			AttachedDriver->PushInThePool();
+			FVector Dir = (AttachedDriver->GetActorLocation() - GetActorLocation()).GetSafeNormal() + FVector(0, 0, 0.5f);
+			AttachedDriver->DamageControl(10000.f, NAME_None, Dir, Dir.GetSafeNormal());
 		}
-		if (IsValid(AttachedShooter) && AttachedShooter->GetPoolState() != EPawnPoolState::InPool)
+		if (IsValid(AttachedShooter) && AttachedShooter->GetPoolState() == EPawnPoolState::Alive)
 		{
-			AttachedShooter->CancelPendingPoolReturn();
-			AttachedShooter->PushInThePool();
+			FVector Dir = (AttachedShooter->GetActorLocation() - GetActorLocation()).GetSafeNormal() + FVector(0, 0, 0.5f);
+			AttachedShooter->DamageControl(10000.f, NAME_None, Dir, Dir.GetSafeNormal());
 		}
 	}
 

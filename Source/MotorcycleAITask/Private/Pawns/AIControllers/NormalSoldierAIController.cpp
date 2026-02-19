@@ -9,7 +9,6 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "NavigationSystem.h"
 #include "EnvironmentQuery/EnvQueryManager.h"
-#include "DrawDebugHelpers.h"
 
 #include "Pawns/MotorcycleShooterPawn.h"
 #include "Pawns/NormalSoldierPawn.h"
@@ -269,10 +268,6 @@ void ANormalSoldierAIController::RunRetreatQuery()
 		FVector AwayDir = (ControlledPawn->GetActorLocation() - SightActor->GetActorLocation()).GetSafeNormal();
 		FVector RetreatPos = ControlledPawn->GetActorLocation() + AwayDir * RetreatMoveDistance;
 		MoveToLocation(RetreatPos, 50.f);
-#if ENABLE_DRAW_DEBUG
-		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Orange, false, 2.f);
-		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Orange, false, 2.f, 0, 1.5f);
-#endif
 		return;
 	}
 
@@ -280,10 +275,6 @@ void ANormalSoldierAIController::RunRetreatQuery()
 	{
 		return;
 	}
-
-#if ENABLE_DRAW_DEBUG
-	DrawDebugSphere(GetWorld(), ControlledPawn->GetActorLocation(), 20.f, 8, FColor::Yellow, false, 1.5f);
-#endif
 
 	FEnvQueryRequest Request(RetreatEQS, ControlledPawn);
 	Request.Execute(EEnvQueryRunMode::SingleResult, this, &ANormalSoldierAIController::OnRetreatQueryFinished);
@@ -303,19 +294,11 @@ void ANormalSoldierAIController::OnRetreatQueryFinished(TSharedPtr<FEnvQueryResu
 	{
 		FVector RetreatPos = Result->GetItemAsLocation(0);
 		MoveToLocation(RetreatPos, 50.f);
-#if ENABLE_DRAW_DEBUG
-		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Green, false, 3.f);
-		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Green, false, 3.f, 0, 1.5f);
-#endif
 	}
 	else
 	{
 		FVector AwayDir = (ControlledPawn->GetActorLocation() - SightActor->GetActorLocation()).GetSafeNormal();
 		FVector RetreatPos = ControlledPawn->GetActorLocation() + AwayDir * RetreatMoveDistance;
 		MoveToLocation(RetreatPos, 50.f);
-#if ENABLE_DRAW_DEBUG
-		DrawDebugSphere(GetWorld(), RetreatPos, 15.f, 8, FColor::Red, false, 3.f);
-		DrawDebugDirectionalArrow(GetWorld(), ControlledPawn->GetActorLocation(), RetreatPos, 20.f, FColor::Red, false, 3.f, 0, 1.5f);
-#endif
 	}
 }

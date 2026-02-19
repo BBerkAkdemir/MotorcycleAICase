@@ -20,14 +20,9 @@
 AMotorcycleDriverPawn::AMotorcycleDriverPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	MaxHealth = 120.f;
+	MaxHealth = 300.f;
 	Health = MaxHealth;
 	AIControllerClass = AMotorcycleDriverAIController::StaticClass();
-
-	if (PerceptionStimuliSource)
-	{
-		PerceptionStimuliSource->bAutoRegister = false;
-	}
 
 	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleRoot"));
 	SetRootComponent(CapsuleComponent);

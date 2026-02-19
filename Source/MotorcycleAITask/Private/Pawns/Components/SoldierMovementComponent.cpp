@@ -79,6 +79,14 @@ void USoldierMovementComponent::DeactivateMovement()
 
 void USoldierMovementComponent::MakeRotate(float DeltaTime)
 {
+	if (OwnerPawn->GetIsFiring() && IsValid(OwnerPawn->GetFireTarget()))
+	{
+		FVector Dir = OwnerPawn->GetFireTarget()->GetActorLocation() - GetOwner()->GetActorLocation();
+		FRotator NewRot = UKismetMathLibrary::MakeRotFromX(FVector(Dir.X, Dir.Y, 0));
+		GetOwner()->SetActorRotation(UKismetMathLibrary::RLerp(GetOwner()->GetActorRotation(), NewRot, RotateSpeed * DeltaTime, true));
+		return;
+	}
+
 	FVector NavVel = OwnerPawn->GetPawnMovement()->Velocity;
 	if (NavVel.SquaredLength() > 20.0f)
 	{

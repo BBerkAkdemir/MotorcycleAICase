@@ -184,6 +184,13 @@ void ANormalSoldierPawn::PerformFire()
 		return;
 	}
 
+	ARaidSimulationBasePawn* FireTargetPawn = Cast<ARaidSimulationBasePawn>(FireTarget);
+	if (FireTargetPawn && FireTargetPawn->GetPoolState() != EPawnPoolState::Alive)
+	{
+		SetIsFiring(false);
+		return;
+	}
+
 	FVector MuzzleLocation = CapsuleComponent->GetComponentLocation();
 	FVector TargetLocation = FireTarget->GetActorLocation() + FVector(0, 0, 50);
 	FVector DirectionToTarget = (TargetLocation - MuzzleLocation).GetSafeNormal();
@@ -222,8 +229,10 @@ void ANormalSoldierPawn::PerformFire()
 		ARaidSimulationBasePawn* HitPawn = Cast<ARaidSimulationBasePawn>(HitResult.GetActor());
 		if (HitPawn)
 		{
-			HitPawn->DamageControl(FireDamage, HitResult.BoneName, DirectionToTarget, HitResult.ImpactNormal);
-			MulticastRPC_OnHitVisual(HitResult.ImpactPoint, HitResult.ImpactNormal);
+			if (HitPawn->DamageControl(FireDamage, HitResult.BoneName, DirectionToTarget, HitResult.ImpactNormal))
+			{
+				MulticastRPC_OnHitVisual(HitResult.ImpactPoint, HitResult.ImpactNormal);
+			}
 			MulticastRPC_OnFireVisual(MuzzleLocation, HitResult.ImpactPoint);
 			return;
 		}
@@ -242,8 +251,10 @@ void ANormalSoldierPawn::PerformFire()
 			ARaidSimulationBasePawn* TargetPawn = Cast<ARaidSimulationBasePawn>(FireTarget);
 			if (TargetPawn)
 			{
-				TargetPawn->DamageControl(FireDamage, NAME_None, DirectionToTarget, -DirectionToTarget);
-				MulticastRPC_OnHitVisual(TargetLocation, -DirectionToTarget);
+				if (TargetPawn->DamageControl(FireDamage, NAME_None, DirectionToTarget, -DirectionToTarget))
+				{
+					MulticastRPC_OnHitVisual(TargetLocation, -DirectionToTarget);
+				}
 				MulticastRPC_OnFireVisual(MuzzleLocation, TargetLocation);
 				return;
 			}
